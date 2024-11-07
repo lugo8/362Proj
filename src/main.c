@@ -1,8 +1,18 @@
 #include "stm32f0xx.h"
 #include <stdint.h>
+#include <math.h>   // for M_PI
 
 void internal_clock();
 
+
+//AUSTINS PART:
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+
+//=============================================================================
+// Part 2: Debounced keypad scanning.
+//=============================================================================
 float cNotes[9] = {16.351999, 32.703999, 65.407997, 130.815994, 261.631989, 523.263977, 1046.527954, 2093.055908, 4186.111816};
 float dNotes[9] = {18.354000, 36.708000, 73.416000, 146.832001, 293.664001, 587.328003, 1174.656006, 2349.312012, 4698.624023};
 float eNotes[9] = {20.601999, 41.203999, 82.407997, 164.815994, 329.631989, 659.263977, 1318.527954, 2637.055908, 5274.111816};
@@ -13,24 +23,42 @@ float bNotes[9] = {30.868000, 61.736000, 123.472000, 246.944000, 493.888000, 987
 
 int OCTAVE = 4;
 
-//AUSTINS PART:
-//==========================================================================================================================================================
-//==========================================================================================================================================================
-//==========================================================================================================================================================
-
-//=============================================================================
-// Part 2: Debounced keypad scanning.
-//=============================================================================
-
 uint8_t col; // the column being scanned
+uint8_t hist[16];
+char queue[2];  // A two-entry queue of button press/release events.
+const char keymap[] = "DCBA#9630852*741";
+int qin;        // Which queue entry is next for input
+int qout;       // Which queue entry is next for output
 
-void drive_column(int);   // energize one of the column outputs
-int  read_rows();         // read the four row inputs
-void update_history(int col, int rows); // record the buttons of the driven column
-char get_key_event(void); // wait for a button event (press or release)
-char get_keypress(void);  // wait for only a button press event.
-float getfloat(void);     // read a floating-point number from keypad
-void show_keys(void);     // demonstrate get_key_event()
+void push_queue(int n) {
+    queue[qin] = n;
+    qin ^= 1;
+}
+
+void update_history(int c, int rows)
+{
+    // We used to make students do this in assembly language.
+    for(int i = 0; i < 4; i++) {
+        hist[4*c+i] = (hist[4*c+i]<<1) + ((rows>>i)&1);
+        if (hist[4*c+i] == 0x01)
+            push_queue(0x80 | keymap[4*c+i]);
+        if (hist[4*c+i] == 0xfe)
+            push_queue(keymap[4*c+i]);
+    }
+}
+
+void drive_column(int c)
+{
+    GPIOC->BSRR = 0xf00000 | ~(1 << (c + 4));
+}
+
+int read_rows()
+{
+    return (~GPIOC->IDR) & 0xf;
+}
+
+
+
 
 //============================================================================
 // The Timer 7 ISR
@@ -271,14 +299,13 @@ int main() {
     internal_clock();
 
     setup_adc();
+    init_tim7();
     init_tim2();
     init_wavetable();
     setup_dac();
     init_tim6();
 
-    for(;;) {
-        set_freq(0,100);
-    }
+    set_freq(0,1000);
 
     
     
