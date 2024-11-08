@@ -9,10 +9,6 @@ void internal_clock();
 //==========================================================================================================================================================
 //==========================================================================================================================================================
 //==========================================================================================================================================================
-
-//=============================================================================
-// Part 2: Debounced keypad scanning.
-//=============================================================================
 float cNotes[9] = {16.351999, 32.703999, 65.407997, 130.815994, 261.631989, 523.263977, 1046.527954, 2093.055908, 4186.111816};
 float dNotes[9] = {18.354000, 36.708000, 73.416000, 146.832001, 293.664001, 587.328003, 1174.656006, 2349.312012, 4698.624023};
 float eNotes[9] = {20.601999, 41.203999, 82.407997, 164.815994, 329.631989, 659.263977, 1318.527954, 2637.055908, 5274.111816};
@@ -21,7 +17,55 @@ float gNotes[9] = {24.500000, 49.000000, 98.000000, 196.000000, 392.000000, 784.
 float aNotes[9] = {27.500000, 55.000000, 110.000000, 220.000000, 440.000000, 880.000000, 1760.000000, 3520.000000, 7040.000000};
 float bNotes[9] = {30.868000, 61.736000, 123.472000, 246.944000, 493.888000, 987.776001, 1975.552002, 3951.104004, 7902.208008};
 
+float** noteMatrix = {aNotes, bNotes, cNotes, dNotes, eNotes, fNotes, gNotes};
+
+
+
 int OCTAVE = 4;
+
+//=============================================================================
+// Part 2: Debounced keypad scanning.
+//=============================================================================
+
+
+const char font[] = {
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x00, // 32: space
+    0x86, // 33: exclamation
+    0x22, // 34: double quote
+    0x76, // 35: octothorpe
+    0x00, // dollar
+    0x00, // percent
+    0x00, // ampersand
+    0x20, // 39: single quote
+    0x39, // 40: open paren
+    0x0f, // 41: close paren
+    0x49, // 42: asterisk
+    0x00, // plus
+    0x10, // 44: comma
+    0x40, // 45: minus
+    0x80, // 46: period
+    0x00, // slash
+    // digits
+    0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x67,
+    // seven unknown
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    // Uppercase
+    0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71, 0x6f, 0x76, 0x30, 0x1e, 0x00, 0x38, 0x00,
+    0x37, 0x3f, 0x73, 0x7b, 0x31, 0x6d, 0x78, 0x3e, 0x00, 0x00, 0x00, 0x6e, 0x00,
+    0x39, // 91: open square bracket
+    0x00, // backslash
+    0x0f, // 93: close square bracket
+    0x00, // circumflex
+    0x08, // 95: underscore
+    0x20, // 96: backquote
+    // Lowercase
+    0x5f, 0x7c, 0x58, 0x5e, 0x79, 0x71, 0x6f, 0x74, 0x10, 0x0e, 0x00, 0x30, 0x00,
+    0x54, 0x5c, 0x73, 0x7b, 0x50, 0x6d, 0x78, 0x1c, 0x00, 0x00, 0x00, 0x6e, 0x00
+};
 
 uint8_t col; // the column being scanned
 uint8_t hist[16];
@@ -29,10 +73,18 @@ char queue[2];  // A two-entry queue of button press/release events.
 const char keymap[] = "DCBA#9630852*741";
 int qin;        // Which queue entry is next for input
 int qout;       // Which queue entry is next for output
+//uint16_t msg[8] = {0,0,0,0,0,0,0,0};
 
 void push_queue(int n) {
     queue[qin] = n;
     qin ^= 1;
+}
+
+char pop_queue() {
+    char tmp = queue[qout];
+    queue[qout] = 0;
+    qout ^= 1;
+    return tmp;
 }
 
 void update_history(int c, int rows)
@@ -55,6 +107,161 @@ void drive_column(int c)
 int read_rows()
 {
     return (~GPIOC->IDR) & 0xf;
+}
+
+
+char get_key_event(void) {
+    for(;;) {
+        asm volatile ("wfi");   // wait for an interrupt
+       if (queue[qout] != 0)
+            break;
+    }
+    return pop_queue();
+}
+
+char get_keypress() {
+    char event;
+    for(;;) {
+        // Wait for every button event...
+        event = get_key_event();
+        // ...but ignore if it's a release.
+        if (event & 0x80)
+            break;
+    }
+    return event & 0x7f;
+}
+
+// void dot()
+// {
+//     msg[7] |= 0x80;
+// }
+
+// void clear_display(void) {
+//     for (int i = 0; i < 8; i++) {
+//         msg[i] = msg[i] & 0xff00;
+//     }
+// }
+
+// void set_digit_segments(int digit, char val) {
+//     msg[digit] = (digit << 8) | val;
+// }
+
+// void append_segments(char val) {
+//     for (int i = 0; i < 7; i++) {
+//         set_digit_segments(i, msg[i+1] & 0xff);
+//     }
+//     set_digit_segments(7, val);
+// }
+
+// float getfloat(void)
+// {
+//     int num = 0;
+//     int digits = 0;
+//     int decimal = 0;
+//     int enter = 0;
+//     clear_display();
+//     set_digit_segments(7, font['0']);
+//     while(!enter) {
+//         int key = get_keypress();
+//         if (digits == 8) {
+//             if (key != '#')
+//                 continue;
+//         }
+//         switch(key) {
+//         case '0':
+//             if (digits == 0)
+//                 continue;
+//         case '1':
+//         case '2':
+//         case '3':
+//         case '4':
+//         case '5':
+//         case '6':
+//         case '7':
+//         case '8':
+//         case '9':
+//             num = num*10 + key-'0';
+//             decimal <<= 1;
+//             digits += 1;
+//             if (digits == 1)
+//                 set_digit_segments(7, font[key]);
+                
+//             else
+//                 append_segments(font[key]);
+                
+//             break;
+//         case '*':
+//             if (decimal == 0) {
+//                 decimal = 1;
+//                 dot();
+//             }
+//             break;
+//         case '#':
+//             enter = 1;
+//             break;
+//         default: continue; // ABCD
+//         }
+//     }
+//     float f = num;
+//     while (decimal) {
+//         decimal >>= 1;
+//         if (decimal)
+//             f = f/10.0;
+//     }
+//     return f;
+// }
+
+int key2Index(char key)
+{
+    switch(key)
+        case 'A': //A note
+            return 0;
+        case 'B': //B note
+            return 1;
+        case 'C': //C note
+            return 2;
+        case 'D': //D note
+            return 3;
+        case '*': //E note
+            return 4;
+        case '0': //F note
+            return 5;
+        case '#': //G note
+            return 6;
+        
+        default:
+            return 0;
+}
+
+int setOctave(char key)
+{
+    switch(key)
+        case '1': 
+            return 0;
+        case '2':
+            return 1;
+        case '3':
+            return 2;
+        case '4': 
+            return 3;
+        case '5': 
+            return 4;
+        case '6': 
+            return 5;
+        case '7': 
+            return 6;
+        case '8': 
+            return 7;
+        case '9': 
+            return 8;
+        
+        default:
+            return 4;
+}
+
+float getNote(char key)
+{
+    return noteMatrix[key2Index][OCTAVE];
 }
 
 
@@ -305,7 +512,25 @@ int main() {
     setup_dac();
     init_tim6();
 
-    set_freq(0,1000);
+    // for(;;)
+    // {
+    //     float f = getfloat();
+    //     set_freq(0,f);
+    // }
+
+    for(;;) {
+        char key = get_keypress();
+        if(key == 'A' || key == 'B' || key == 'C' || key == 'D' || key == '*' || key == '0' || key == '#')
+        {
+            set_freq(0,getNote(key));
+        }
+        else if((key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'))
+        {
+            OCTAVE = setOctave(key);
+        }
+            
+
+    }
 
     
     
