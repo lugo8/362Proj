@@ -9,15 +9,22 @@ void internal_clock();
 //==========================================================================================================================================================
 //==========================================================================================================================================================
 //==========================================================================================================================================================
-float cNotes[9] = {16.351999, 32.703999, 65.407997, 130.815994, 261.631989, 523.263977, 1046.527954, 2093.055908, 4186.111816};
-float dNotes[9] = {18.354000, 36.708000, 73.416000, 146.832001, 293.664001, 587.328003, 1174.656006, 2349.312012, 4698.624023};
-float eNotes[9] = {20.601999, 41.203999, 82.407997, 164.815994, 329.631989, 659.263977, 1318.527954, 2637.055908, 5274.111816};
-float fNotes[9] = {21.827000, 43.653999, 87.307999, 174.615997, 349.231995, 698.463989, 1396.927979, 2793.855957, 5587.711914};
-float gNotes[9] = {24.500000, 49.000000, 98.000000, 196.000000, 392.000000, 784.000000, 1568.000000, 3136.000000, 6272.000000};
-float aNotes[9] = {27.500000, 55.000000, 110.000000, 220.000000, 440.000000, 880.000000, 1760.000000, 3520.000000, 7040.000000};
-float bNotes[9] = {30.868000, 61.736000, 123.472000, 246.944000, 493.888000, 987.776001, 1975.552002, 3951.104004, 7902.208008};
+// float cNotes[9] = {16.351999, 32.703999, 65.407997, 130.815994, 261.631989, 523.263977, 1046.527954, 2093.055908, 4186.111816};
+// float dNotes[9] = {18.354000, 36.708000, 73.416000, 146.832001, 293.664001, 587.328003, 1174.656006, 2349.312012, 4698.624023};
+// float eNotes[9] = {20.601999, 41.203999, 82.407997, 164.815994, 329.631989, 659.263977, 1318.527954, 2637.055908, 5274.111816};
+// float fNotes[9] = {21.827000, 43.653999, 87.307999, 174.615997, 349.231995, 698.463989, 1396.927979, 2793.855957, 5587.711914};
+// float gNotes[9] = {24.500000, 49.000000, 98.000000, 196.000000, 392.000000, 784.000000, 1568.000000, 3136.000000, 6272.000000};
+// float aNotes[9] = {27.500000, 55.000000, 110.000000, 220.000000, 440.000000, 880.000000, 1760.000000, 3520.000000, 7040.000000};
+// float bNotes[9] = {30.868000, 61.736000, 123.472000, 246.944000, 493.888000, 987.776001, 1975.552002, 3951.104004, 7902.208008};
 
-float** noteMatrix = {aNotes, bNotes, cNotes, dNotes, eNotes, fNotes, gNotes};
+float noteMatrix[7][9] = {
+                        {27.500000, 55.000000, 110.000000, 220.000000, 440.000000, 880.000000, 1760.000000, 3520.000000, 7040.000000}, //A note
+                        {30.868000, 61.736000, 123.472000, 246.944000, 493.888000, 987.776001, 1975.552002, 3951.104004, 7902.208008}, //B note
+                        {16.351999, 32.703999, 65.407997, 130.815994, 261.631989, 523.263977, 1046.527954, 2093.055908, 4186.111816},  //C note
+                        {18.354000, 36.708000, 73.416000, 146.832001, 293.664001, 587.328003, 1174.656006, 2349.312012, 4698.624023},  //D note
+                        {20.601999, 41.203999, 82.407997, 164.815994, 329.631989, 659.263977, 1318.527954, 2637.055908, 5274.111816},  //E note
+                        {21.827000, 43.653999, 87.307999, 174.615997, 349.231995, 698.463989, 1396.927979, 2793.855957, 5587.711914},  //F note
+                        {24.500000, 49.000000, 98.000000, 196.000000, 392.000000, 784.000000, 1568.000000, 3136.000000, 6272.000000}}; //G note
 
 
 
@@ -68,34 +75,53 @@ const char font[] = {
 };
 
 uint8_t col; // the column being scanned
-uint8_t hist[16];
-char queue[2];  // A two-entry queue of button press/release events.
+char hist[4][8] = {{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},
+                   {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'}};
+// char queue[2];  // A two-entry queue of button press/release events.
 const char keymap[] = "DCBA#9630852*741";
-int qin;        // Which queue entry is next for input
-int qout;       // Which queue entry is next for output
-//uint16_t msg[8] = {0,0,0,0,0,0,0,0};
+char pressed = '4';
 
-void push_queue(int n) {
-    queue[qin] = n;
-    qin ^= 1;
-}
 
-char pop_queue() {
-    char tmp = queue[qout];
-    queue[qout] = 0;
-    qout ^= 1;
-    return tmp;
+char update_pressed(int column, int rows)
+{
+    for(int i = 0; i < 4; i++)
+    {
+        if(((rows>>i)&1))
+        {
+            return keymap[4*column + i];
+        }
+    }
+
+    return '\0';
+    
 }
 
 void update_history(int c, int rows)
 {
-    // We used to make students do this in assembly language.
-    for(int i = 0; i < 4; i++) {
-        hist[4*c+i] = (hist[4*c+i]<<1) + ((rows>>i)&1);
-        if (hist[4*c+i] == 0x01)
-            push_queue(0x80 | keymap[4*c+i]);
-        if (hist[4*c+i] == 0xfe)
-            push_queue(keymap[4*c+i]);
+    
+    //Shift and add new value
+    for(int i = 6; i >= 0; i--) 
+    {
+        hist[c][i + 1] = hist[c][i];
+    }
+
+    hist[c][0] = update_pressed(c, rows);
+    
+}
+
+char getKey()
+{
+    for(;;)
+    {
+        for(int column = 0; column < 4; column++)
+        { 
+            if(hist[column][0] == hist[column][1] && hist[column][1] == hist[column][2] && hist[column][2] == hist[column][3] 
+            && hist[column][3] == hist[column][4] && hist[column][4] == hist[column][5] && hist[column][5] == hist[column][6]
+            && hist[column][6] == hist[column][7]) //History is all same to remove debouncing
+            {
+                return hist[col][0];
+            }
+        }
     }
 }
 
@@ -109,111 +135,10 @@ int read_rows()
     return (~GPIOC->IDR) & 0xf;
 }
 
-
-char get_key_event(void) {
-    for(;;) {
-        asm volatile ("wfi");   // wait for an interrupt
-       if (queue[qout] != 0)
-            break;
-    }
-    return pop_queue();
-}
-
-char get_keypress() {
-    char event;
-    for(;;) {
-        // Wait for every button event...
-        event = get_key_event();
-        // ...but ignore if it's a release.
-        if (event & 0x80)
-            break;
-    }
-    return event & 0x7f;
-}
-
-// void dot()
-// {
-//     msg[7] |= 0x80;
-// }
-
-// void clear_display(void) {
-//     for (int i = 0; i < 8; i++) {
-//         msg[i] = msg[i] & 0xff00;
-//     }
-// }
-
-// void set_digit_segments(int digit, char val) {
-//     msg[digit] = (digit << 8) | val;
-// }
-
-// void append_segments(char val) {
-//     for (int i = 0; i < 7; i++) {
-//         set_digit_segments(i, msg[i+1] & 0xff);
-//     }
-//     set_digit_segments(7, val);
-// }
-
-// float getfloat(void)
-// {
-//     int num = 0;
-//     int digits = 0;
-//     int decimal = 0;
-//     int enter = 0;
-//     clear_display();
-//     set_digit_segments(7, font['0']);
-//     while(!enter) {
-//         int key = get_keypress();
-//         if (digits == 8) {
-//             if (key != '#')
-//                 continue;
-//         }
-//         switch(key) {
-//         case '0':
-//             if (digits == 0)
-//                 continue;
-//         case '1':
-//         case '2':
-//         case '3':
-//         case '4':
-//         case '5':
-//         case '6':
-//         case '7':
-//         case '8':
-//         case '9':
-//             num = num*10 + key-'0';
-//             decimal <<= 1;
-//             digits += 1;
-//             if (digits == 1)
-//                 set_digit_segments(7, font[key]);
-                
-//             else
-//                 append_segments(font[key]);
-                
-//             break;
-//         case '*':
-//             if (decimal == 0) {
-//                 decimal = 1;
-//                 dot();
-//             }
-//             break;
-//         case '#':
-//             enter = 1;
-//             break;
-//         default: continue; // ABCD
-//         }
-//     }
-//     float f = num;
-//     while (decimal) {
-//         decimal >>= 1;
-//         if (decimal)
-//             f = f/10.0;
-//     }
-//     return f;
-// }
-
 int key2Index(char key)
 {
     switch(key)
+    {
         case 'A': //A note
             return 0;
         case 'B': //B note
@@ -231,11 +156,13 @@ int key2Index(char key)
         
         default:
             return 0;
+    }
 }
 
 int setOctave(char key)
 {
     switch(key)
+    {
         case '1': 
             return 0;
         case '2':
@@ -257,15 +184,36 @@ int setOctave(char key)
         
         default:
             return 4;
+    }
 }
 
 float getNote(char key)
 {
-    return noteMatrix[key2Index][OCTAVE];
+    return noteMatrix[key2Index(key)][OCTAVE];
 }
 
 
+//============================================================================
+// GPIOC enable
+//============================================================================
+void enable_c(void) {
+    //Enable RCC clock to GPIOC
+    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
 
+    //PC4-7 as outputs
+    GPIOC->MODER &= ~0x0ff00; //Clear
+    GPIOC->MODER |= 0x05500; //Output
+
+    //PC4-7 output open-drain type
+    GPIOC->OTYPER |= 0x0f0;
+
+    //PC0-3 as inputs
+    GPIOC->MODER &= ~0x0ff; //Input
+
+    //PC0-3 pull up
+    GPIOC->PUPDR &= ~0x0ff; //Clear
+    GPIOC->PUPDR |= 0x055; //Pull down
+}
 
 //============================================================================
 // The Timer 7 ISR
@@ -505,6 +453,8 @@ void init_tim6(void) {
 int main() {
     internal_clock();
 
+    enable_c();
+
     setup_adc();
     init_tim7();
     init_tim2();
@@ -512,14 +462,17 @@ int main() {
     setup_dac();
     init_tim6();
 
+    // float f = 600; //getfloat();
     // for(;;)
     // {
-    //     float f = getfloat();
+        
     //     set_freq(0,f);
+    //     f += .0001;
     // }
+    set_freq(0,0);
 
     for(;;) {
-        char key = get_keypress();
+        char key = getKey();
         if(key == 'A' || key == 'B' || key == 'C' || key == 'D' || key == '*' || key == '0' || key == '#')
         {
             set_freq(0,getNote(key));
@@ -528,8 +481,6 @@ int main() {
         {
             OCTAVE = setOctave(key);
         }
-            
-
     }
 
     
