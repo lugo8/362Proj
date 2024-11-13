@@ -1,6 +1,8 @@
 #include "stm32f0xx.h"
 #include <stdint.h>
 #include <math.h>   // for M_PI
+#include <stdio.h>
+#include <stdlib.h>
 
 void internal_clock();
 
@@ -27,8 +29,6 @@ float noteMatrix[7][9] = {
                         {24.500000, 49.000000, 98.000000, 196.000000, 392.000000, 784.000000, 1568.000000, 3136.000000, 6272.000000}}; //G note
 
 
-
-int OCTAVE = 4;
 
 //=============================================================================
 // Part 2: Debounced keypad scanning.
@@ -73,6 +73,235 @@ const char font[] = {
     0x5f, 0x7c, 0x58, 0x5e, 0x79, 0x71, 0x6f, 0x74, 0x10, 0x0e, 0x00, 0x30, 0x00,
     0x54, 0x5c, 0x73, 0x7b, 0x50, 0x6d, 0x78, 0x1c, 0x00, 0x00, 0x00, 0x6e, 0x00
 };
+
+
+
+
+typedef struct noteDuration {
+    char note;
+    float duration;
+    struct noteDuration* next; 
+} noteDuration;
+
+int VOLUME = 64;
+int OCTAVE = 4;
+
+noteDuration* headOfNotes = NULL;
+
+
+
+void freeList(noteDuration* head) {
+    noteDuration* current = head;
+    noteDuration* nextNode;
+    
+    while (current != NULL) {
+        nextNode = current->next;
+        free(current);
+        current = nextNode;
+    }
+}
+
+noteDuration* createNode(char note, float duration) {
+    noteDuration* newNode = (noteDuration*)malloc(sizeof(noteDuration));
+    if (newNode == NULL) {
+        printf("Memory allocation failed\n");
+        exit(1);
+    }
+    newNode->note = note;
+    newNode->duration = duration;
+    newNode->next = NULL;
+    return newNode;
+}
+
+void pushBack(noteDuration* head, char note, float duration)
+{
+    noteDuration* iter = head;
+
+    if(head == NULL)
+    {
+        return;
+    }
+
+    while(iter->next != NULL)
+    {
+        iter = iter->next;
+    }
+
+    iter->next = createNode(note, duration);
+
+}
+
+void write_variable_length(FILE *file, uint32_t value) {
+    uint8_t buffer[4];
+    int i = 0;
+
+    do {
+        buffer[i] = value & 0x7F; // Keep the lower 7 bits
+        if (i > 0) {
+            buffer[i] |= 0x80; // Set the MSB for continuation
+        }
+        value >>= 7; // Shift right by 7 bits
+        i++;
+    } while (value > 0);
+
+    // Write the bytes in reverse order (most significant byte first)
+    for (int j = i - 1; j >= 0; j--) {
+        fputc(buffer[j], file);
+    }
+}
+
+void write_tempo_meta_event(FILE *file, uint32_t tempo) {
+    // Tempo meta-event format: 0xFF 0x51 0x03 t1 t2 t3
+    fputc(0x00, file);    // Delta time (0 for immediate effect)
+    fputc(0xFF, file);    // Meta-event
+    fputc(0x51, file);    // Tempo event type
+    fputc(0x03, file);    // Length of the data (3 bytes)
+
+    // Split the 24-bit tempo value into three bytes (big-endian)
+    fputc((tempo >> 16) & 0xFF, file);  // Byte 1
+    fputc((tempo >> 8) & 0xFF, file);   // Byte 2
+    fputc(tempo & 0xFF, file);          // Byte 3
+}
+
+void write_note_on(FILE *file, uint8_t channel, uint8_t note, uint8_t velocity) {
+    fputc(0x00, file);                  // Delta time (0 for immediate effect)
+    fputc(0x90 | (channel & 0x0F), file); // Note-on event for the given channel
+    fputc(note, file);                  // Note number (e.g., 60 for middle C)
+    fputc(velocity, file);              // Velocity (e.g., 64 for medium)
+}
+
+void write_note_off(FILE *file, uint32_t delta_time, uint8_t channel, uint8_t note, uint8_t velocity) {
+    write_variable_length(file, delta_time); // Delta time before note-off
+    fputc(0x80 | (channel & 0x0F), file);    // Note-off event for the given channel
+    fputc(note, file);                       // Note number
+    fputc(velocity, file);                   // Velocity (usually 0)
+}
+
+long calcTime(float sec)
+{
+    float microsec = sec * 1000000;
+    float microSecPerTick = 500000 / 480 ; //micro-s per tick
+
+    long ticks = microsec / microSecPerTick;
+
+    return ticks;
+
+}
+
+int note2Offset(char note)
+{
+    switch (note)
+    {
+        // C = 0
+        // D = 2
+        // E = 4
+        // F = 5
+        // G = 7
+        // A = 9
+        // B = 11
+        case 'C':
+            return 0;    
+        case 'D':
+            return 2; 
+        case 'E':
+            return 4; 
+        case 'F':
+            return 5; 
+        case 'G':
+            return 7; 
+        case 'A':
+            return 9; 
+        case 'B':
+            return 11;     
+        default:
+            return 0;
+    }
+}
+
+int getNoteNum(char note)
+{
+    int number = (12 * OCTAVE) + note2Offset(note);
+    return number;
+}
+
+
+
+void writeNotes(noteDuration* head, FILE* file)
+{
+    noteDuration* iter = head;
+
+    if(head == NULL)
+    {
+        return;
+    }
+
+    while(iter != NULL)
+    {     
+        //Duration
+        long duration = calcTime(iter->duration);
+
+        int noteNum = getNoteNum(iter->note);
+
+        //TODO: implement volume 
+
+        // Write note-on event
+        write_note_on(file, 0, noteNum, VOLUME);
+
+        //Write note off event
+        write_note_off(file, duration, 0, noteNum, 0);
+
+        iter = iter->next;
+    }
+}
+
+void write2File(noteDuration* notes)
+{
+    FILE *file = fopen("output.mid", "wb");
+
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+
+    // Write MIDI header chunk
+    fwrite("MThd", 1, 4, file);
+    fputc(0x00, file); fputc(0x00, file); fputc(0x00, file); fputc(0x06, file); // Header length (6 bytes)
+    fputc(0x00, file); fputc(0x01, file); // Format type (1 for multi-track)
+    fputc(0x00, file); fputc(0x01, file); // Number of tracks (1)
+    fputc(0x01, file); fputc(0xE0, file); // Division (480 ticks per quarter note)
+
+    // Write track chunk header
+    fwrite("MTrk", 1, 4, file);
+    fputc(0x00, file); fputc(0x00, file); fputc(0x00, file); fputc(0x00, file); // Placeholder for track length
+
+    // Write tempo meta-event (e.g., 500,000 μs/qn for 120 BPM)
+    write_tempo_meta_event(file, 500000);
+
+    //Write all notes to file
+    writeNotes(notes, file);
+
+    // Write end-of-track meta-event
+    fputc(0x00, file);    // Delta time (immediately after last event)
+    fputc(0xFF, file);    // Meta-event
+    fputc(0x2F, file);    // End-of-track event type
+    fputc(0x00, file);    // Length (0 bytes)
+
+    // Go back and write the actual track length (subtract 8 bytes for "MTrk" and length placeholder)
+    long end_position = ftell(file);
+    long track_length = end_position - 22; // Header (14 bytes) + "MTrk" (4 bytes) + length field (4 bytes)
+    fseek(file, 18, SEEK_SET); // Move to the length field position
+    fputc((track_length >> 24) & 0xFF, file);
+    fputc((track_length >> 16) & 0xFF, file);
+    fputc((track_length >> 8) & 0xFF, file);
+    fputc(track_length & 0xFF, file);
+    fseek(file, end_position, SEEK_SET); // Move back to the end of the file
+
+    freeList(notes);
+    fclose(file);
+    return;
+}
+
+
 
 uint8_t col; // the column being scanned
 char hist[4][8] = {{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},
@@ -119,6 +348,14 @@ char getKey()
             && hist[column][3] == hist[column][4] && hist[column][4] == hist[column][5] && hist[column][5] == hist[column][6]
             && hist[column][6] == hist[column][7]) //History is all same to remove debouncing
             {
+                if(headOfNotes == NULL)
+                {
+                    headOfNotes = createNode(hist[col][0], 1.5f);
+                }
+                else
+                {
+                    pushBack(headOfNotes, hist[col][0], 1.5f);
+                }
                 return hist[col][0];
             }
         }
@@ -475,6 +712,21 @@ int main() {
         char key = getKey();
         if(key == 'A' || key == 'B' || key == 'C' || key == 'D' || key == '*' || key == '0' || key == '#')
         {
+            //Save by pressing "#" and "*"
+            if(key == '#')
+            {
+                col += 2;
+                char key2 = getKey();
+                if(key2 == '*')
+                {
+                    write2File(headOfNotes);
+                    headOfNotes = NULL;
+                    return 0;
+                }
+                col -= 2;
+
+            }
+            
             set_freq(0,getNote(key));
         }
         else if((key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'))
