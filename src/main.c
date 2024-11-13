@@ -364,12 +364,12 @@ char getKey()
 
 void drive_column(int c)
 {
-    GPIOC->BSRR = 0xf00000 | ~(1 << (c + 4));
+    GPIOC->BSRR = 0xf00000 | ~(1 << (c + 4 + 8));
 }
 
 int read_rows()
 {
-    return (~GPIOC->IDR) & 0xf;
+    return (((~GPIOC->IDR) & 0xf0) >> 4);
 }
 
 int key2Index(char key)
@@ -437,19 +437,19 @@ void enable_c(void) {
     //Enable RCC clock to GPIOC
     RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
 
-    //PC4-7 as outputs
-    GPIOC->MODER &= ~0x0ff00; //Clear
-    GPIOC->MODER |= 0x05500; //Output
+    //PC8-11 as outputs
+    GPIOC->MODER &= ~0x0ff0000; //Clear
+    GPIOC->MODER |= 0x0550000; //Output
 
-    //PC4-7 output open-drain type
-    GPIOC->OTYPER |= 0x0f0;
+    //PC8-11 output open-drain type
+    GPIOC->OTYPER |= 0x0f000;
 
-    //PC0-3 as inputs
-    GPIOC->MODER &= ~0x0ff; //Input
+    //PC4-7 as inputs
+    GPIOC->MODER &= ~0x0ff00; //Input
 
-    //PC0-3 pull up
-    GPIOC->PUPDR &= ~0x0ff; //Clear
-    GPIOC->PUPDR |= 0x055; //Pull down
+    //PC4-7 pull up
+    GPIOC->PUPDR &= ~0x0ff00; //Clear
+    GPIOC->PUPDR |= 0x05500; //Pull down
 }
 
 //============================================================================
