@@ -455,12 +455,12 @@ char getKey()
 
 void drive_column(int c)
 {
-    GPIOC->BSRR = 0xf00000 | ~(1 << (c + 4 + 4));
+    GPIOA->BSRR = 0xf00000 | ~(1 << (c + 4 + 5));
 }
 
 int read_rows()
 {
-    return (((~GPIOC->IDR) & 0xf0) >> 4);
+    return (((~GPIOA->IDR) & 0x1f0) >> 5);
 }
 
 int key2Index(char key)
@@ -705,25 +705,25 @@ void LCD_DrawSpecialChar(u16 x, u16 y, u16 fc, u16 bc, char num, u16 res){
 
 
 //============================================================================
-// GPIOC enable
+// GPIOA enable
 //============================================================================
 void enable_a(void) {
-    //Enable RCC clock to GPIOC
+    //Enable RCC clock to GPIOA
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-    //PA8-11 as outputs
-    GPIOA->MODER &= ~0x0ff0000; //Clear
-    GPIOA->MODER |= 0x0550000; //Output
+    //PA9-12 as outputs
+    GPIOA->MODER &= ~0x3fc0000; //Clear
+    GPIOA->MODER |= 0x1540000; //Output
 
-    //PA8-11 output open-drain type
-    GPIOA->OTYPER |= 0x0f000;
+    //PA9-12 output open-drain type
+    GPIOA->OTYPER |= 0x1e000;
 
-    //PA5-7 as inputs
-    GPIOA->MODER &= ~0x0ff00; //Input
+    //PA5-8 as inputs
+    GPIOA->MODER &= ~0x3fc00; //Input
 
-    //PA5-7 pull up
-    GPIOA->PUPDR &= ~0x0ff00; //Clear
-    GPIOA->PUPDR |= 0x05500; //Pull down
+    //PA5-8 pull up
+    GPIOA->PUPDR &= ~0x3fc00; //Clear
+    GPIOA->PUPDR |= 0x15400; //Pull down
 }
 
 //============================================================================
