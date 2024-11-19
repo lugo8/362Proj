@@ -6,6 +6,12 @@
 #include "ff.h"   // FatFS library
 #include "diskio.h" // SD card driver
 #include <string.h>
+#include "commands.h"
+#include "tty.h"
+#include <stdio.h>
+#include "fifo.h"
+#include "tty.h"
+#include "lcd.h"
 
 
 void internal_clock();
@@ -378,6 +384,13 @@ void write2Array(noteDuration* notes) {
 
 
 
+
+
+//THE OTHER PART:
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+
 uint8_t col; // the column being scanned
 char hist[4][8] = {{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},
                    {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},{'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'}};
@@ -505,27 +518,212 @@ float getNote(char key)
     return noteMatrix[key2Index(key)][OCTAVE];
 }
 
+//JOSH'S PART:
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+//==========================================================================================================================================================
+
+
+#define FIFOSIZE 16
+char serfifo[FIFOSIZE];
+int seroffset = 0;
+const unsigned int asc3_3232[7][32]={
+    {0x0,0x0,0x0,0x01F98000,0x03FBC000,0x073FE000,0x061FE000,0x00076000,0x000FF000,0x007DF000,0x00FBF800,0x01DFF800,0x019FB800,0X00077800,0X000E7800,0x001C7800,0X00187800,0X00387800,0X00387800,0X00701E00,0X00701E00,0X00FFFE00,0X00FFFE00,0X01C01E00,0X01801E00,0X01800780,0X01800F80,0X0FC01F98,0X1FF01FB8,0X1FF807F0,0X38FC07E0,0X0}, /*Note A*/
+    {0x0,0x0,0x3C00FC00,0X7E01FE00,0XE73B1F00,0XC3BF0F80,0X01FC07C0,0x00DC03C0,0X01BCC3C0,0X033CC3C0,0X033CC3C0,0X073CC3C0,0X073CC380,0X0F3CC300,0X033C0E00,0X033C0E00,0X0F3CC300,0X073CC380,0X073CC3C0,0X033CC3C0,0X0338C3C0,0X07B0C3C0,0X0FF0C3C0,0X0C70C3C0,0X003003C0,0X001803C0,0X03FC0F80,0X07FFFF00,0X0E1FFC00,0XC0FF800,0X0,0X0}, /*Note B*/
+    {0x0,0x0,0x1ff800,0x3fff00,0x7fff80,0xfc03c0,0x1f000e0,0x1b00020,0x3200130,0x36000f0,0x6600060,0x6600000,0x6600000,0x6600000,0x6600000,0x6600000,0x6600000,0x6e00000,0x6e00000,0xf800040,0x1f800020,0x3f000060,0x3800040,0x1f001c0,0xf00180,0x7c1f00,0x3ffe00,0xff000,0x0,0x0,0x0,0x0}, /*Note C*/
+    {0x0,0x0,0x41ff800,0x33ffc00,0x3fffe00,0x1ffff00,0x1f80,0xf80,0x900780,0x3980780,0x7980780,0xe980780,0x1e99e780,0x1e93f780,0x4900780,0x5800780,0x1d800780,0x1d900780,0x593f780,0x799e780,0x7180780,0x6180780,0xc180780,0x10380780,0x700f00,0xf01e00,0x7fc3c00,0xffff800,0xc1ff000,0x101fe000,0x0,0x0}, /*Note D*/
+    {0x0,0xe0000,0xffc000,0x3ffffc00,0x7ffffe00,0xdef01f00,0x1dc00180,0x19800080,0x19000000,0x19000000,0x19000000,0x19100000,0x193c0000,0x193ff800,0x197fff80,0x197f0000,0x19c00000,0x1b800000,0x1b000000,0x1e000000,0x1c000000,0x30000000,0x27fffe00,0xfffff00,0x7fc00380,0x78000080,0x60000000,0x4c000000,0x66000000,0x3f000000,0xe000000,0x0}, /*Note E*/
+    {0x0,0x0,0x10000000,0xf000000,0x3ff0008,0x3ff8018,0x17ff078,0x37ffff0,0x75fff80,0xcc1f800,0xdc00000,0xd800000,0xd800000,0xd8c0000,0xd8f0020,0xd8fc0e0,0xdcfffc0,0x6cffe00,0x6ce0000,0x2e80000,0x3e00000,0x3c00000,0x3c00000,0x23800000,0x47800000,0x6f000000,0x3e000000,0x1c000000,0x0,0x0,0x0,0x0},/*Note F*/
+    {0x0,0x1ff000,0x7ffe00,0xffffc0,0x1ffffe0,0x3be00f0,0x7700030,0xe600018,0x3ee00018,0xee00070,0xee00080,0xee00000,0xee00000,0xee03f00,0xee1ffe0,0xee1fc78,0xee3c1bc,0xec601cc,0xec000f8,0xec000f0,0x7c001e0,0x7c001c0,0xf8007c0,0x1e200f80,0x3c783f00,0x207ffe00,0x1ff000,0x7c000,0x0,0x0,0x0,0x0} /*Note G*/
+
+
+};
+
+void enable_tty_interrupt(void) {
+    NVIC->ISER[0] |=  1 << 29;    //set NVIC ISER bit related to USART5
+    USART5->CR1 |=  USART_CR1_RXNEIE;  //raise interrupt data register becomes not empty
+    USART5->CR3 |= USART_CR3_DMAR;  //Trigger DMA when recieve data register becomes not empty
+
+    RCC->AHBENR |= RCC_AHBENR_DMA2EN;
+    DMA2->CSELR |= DMA2_CSELR_CH2_USART5_RX;
+    DMA2_Channel2->CCR &= ~DMA_CCR_EN;
+
+    DMA2_Channel2->CMAR = &serfifo; //Assign Memory to Serfifo
+    DMA2_Channel2->CPAR = &(USART5->RDR); //Assign Peripheral to USART
+    DMA2_Channel2->CNDTR = FIFOSIZE; //amount of data is FIFOSIZE
+    DMA2_Channel2->CCR &= ~DMA_CCR_DIR; //read from peripheral
+    DMA2_Channel2->CCR &= ~(DMA_CCR_MSIZE & DMA_CCR_PSIZE); //set M/P size to 8 bit
+    DMA2_Channel2->CCR |= DMA_CCR_MINC; //increment Memory
+    DMA2_Channel2->CCR &= ~DMA_CCR_PINC; //do not increment usart peripheral
+    DMA2_Channel2->CCR |= DMA_CCR_CIRC; //enable circular mode
+    DMA2_Channel2->CCR &= ~DMA_CCR_MEM2MEM; //disable mem2mem mode
+    DMA2_Channel2->CCR |= DMA_CCR_PL; //set both bit of priority to highest
+
+    DMA2_Channel2->CCR |= DMA_CCR_EN; //En channel
+
+
+}
+
+int __io_putchar(int c) {
+    // TODO copy from STEP2
+    if (c == 10)
+    {
+        while(!(USART5->ISR & USART_ISR_TXE));
+        USART5->TDR = 13;
+    }
+
+    while(!(USART5->ISR & USART_ISR_TXE));
+    USART5->TDR = c;
+    return c;
+}
+
+char interrupt_getchar() {
+    // TODO
+    if (!fifo_newline(&input_fifo))
+    {
+        asm volatile ("wfi");
+    }
+    char ch = fifo_remove(&input_fifo);
+    return ch;
+    
+}
+
+int __io_getchar(void) {
+    // TODO Use interrupt_getchar() instead of line_buffer_getchar()
+   return interrupt_getchar();
+}
+
+void USART3_8_IRQHandler(void) { //Hopefully is the correct name
+    while(DMA2_Channel2->CNDTR != sizeof serfifo - seroffset) {
+        if (!fifo_full(&input_fifo))
+            insert_echo_char(serfifo[seroffset]);
+        seroffset = (seroffset + 1) % sizeof serfifo;
+    }
+}
+
+void init_spi1_slow() {
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    GPIOB->MODER &= ~0xFC0;
+    GPIOB->MODER |= 0xA80;
+    GPIOB->AFR[0] &= ~0x00FFF000;
+
+    SPI1->CR1 &= ~SPI_CR1_SPE;
+
+    SPI1->CR1 |= SPI_CR1_BR;
+    SPI1->CR1 |= SPI_CR1_MSTR;
+    SPI1->CR1 |= SPI_CR1_SSM;
+    SPI1->CR1 |= SPI_CR1_SSI;
+    SPI1->CR2 |= SPI_CR2_DS;
+    SPI1->CR2 |= SPI_CR2_FRXTH;
+    SPI1->CR2 &= ~SPI_CR2_DS_3; //turn 8 bit
+
+    SPI1->CR1 |= SPI_CR1_SPE;
+}
+
+
+void init_sdcard_io() {
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    init_spi1_slow();
+    GPIOB->MODER &= ~ 0x30;
+    GPIOB->MODER |= 0x10;
+    disable_sdcard();
+}
+
+void sdcard_io_high_speed() {
+    SPI1->CR1 &= ~SPI_CR1_SPE;
+
+    SPI1->CR1 &= ~SPI_CR1_BR;
+    SPI1->CR1 |= SPI_CR1_BR_0;
+
+    SPI1->CR1 |= SPI_CR1_SPE;
+}
+
+
+
+void init_lcd_spi() {
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    GPIOB->MODER &= ~0x30C30000;
+    GPIOB->MODER |= 0x10410000;
+    init_spi1_slow();
+    sdcard_io_high_speed();
+}
+
+void lcd_start_setup() {
+    LCD_Setup();
+    LCD_Clear(0xFFFF);
+    LCD_DrawString(0,96,0x0000,0xFFFF, "The octave is now:", 16, 0);
+    
+
+}
+
+void _LCD_DrawSpecialChar(u16 x, u16 y, u16 fc, u16 bc, char num, u16 res) {
+    int temp, tempres, tempres1;
+    u8 pos, t;
+
+    num = (char)(key2Index(num));
+    int size = 32 * res;
+    if((num < 0) || (num > 6))
+    {
+        LCD_DrawFillRectangle(x, y, x + size, y + size, bc);
+        return;
+    }
+
+    LCD_SetWindow(x, y, x + size - 1, y + size - 1);
+    LCD_WriteData16_Prepare();
+    for(pos = 0; pos < 32; pos++)
+    {
+        for(tempres = 0; tempres < res; tempres++)
+        {
+            temp = asc3_3232[(int)num][pos];
+            for(t=0;t<32;t++)
+            {
+                for(tempres1 = 0; tempres1 < res; tempres1++)
+                {
+                    if(temp&0x80000000)
+                        LCD_WriteData16(fc);
+                    else
+                        LCD_WriteData16(bc);
+
+                }
+                temp<<=1;
+            }
+
+
+        }
+        
+    }
+    LCD_WriteData16_End();
+}
+
+void LCD_DrawSpecialChar(u16 x, u16 y, u16 fc, u16 bc, char num, u16 res){
+    lcddev.select(1);
+    _LCD_DrawSpecialChar(x,y,fc,bc,num, res);
+    lcddev.select(0);
+}
+
+
 
 //============================================================================
 // GPIOC enable
 //============================================================================
-void enable_c(void) {
+void enable_a(void) {
     //Enable RCC clock to GPIOC
-    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-    //PC8-11 as outputs
-    GPIOC->MODER &= ~0x0ff0000; //Clear
-    GPIOC->MODER |= 0x0550000; //Output
+    //PA8-11 as outputs
+    GPIOA->MODER &= ~0x0ff0000; //Clear
+    GPIOA->MODER |= 0x0550000; //Output
 
-    //PC8-11 output open-drain type
-    GPIOC->OTYPER |= 0x0f000;
+    //PA8-11 output open-drain type
+    GPIOA->OTYPER |= 0x0f000;
 
-    //PC4-7 as inputs
-    GPIOC->MODER &= ~0x0ff00; //Input
+    //PA5-7 as inputs
+    GPIOA->MODER &= ~0x0ff00; //Input
 
-    //PC4-7 pull up
-    GPIOC->PUPDR &= ~0x0ff00; //Clear
-    GPIOC->PUPDR |= 0x05500; //Pull down
+    //PA5-7 pull up
+    GPIOA->PUPDR &= ~0x0ff00; //Clear
+    GPIOA->PUPDR |= 0x05500; //Pull down
 }
 
 //============================================================================
@@ -766,7 +964,7 @@ void init_tim6(void) {
 int main() {
     internal_clock();
 
-    enable_c();
+    enable_a();
 
     setup_adc();
     init_tim7();
@@ -775,13 +973,15 @@ int main() {
     setup_dac();
     init_tim6();
 
-    // float f = 600; //getfloat();
-    // for(;;)
-    // {
-        
-    //     set_freq(0,f);
-    //     f += .0001;
-    // }
+
+    //init_usart5();
+    // enable_tty_interrupt();
+    // setbuf(stdin,0);
+    // setbuf(stdout,0);
+    // setbuf(stderr,0);
+    //command_shell();
+    lcd_start_setup();
+
     set_freq(0,0);
 
     freeList(headOfNotes);
@@ -793,11 +993,15 @@ int main() {
         {
             
             set_freq(0,getNote(key));
+            LCD_DrawSpecialChar(0,0, 0x0000, 0xffff, key, 3);
         }
         //Change octave
         else if((key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8'))
         {
             OCTAVE = setOctave(key);
+            LCD_DrawChar(152, 96, 0x0000, 0xFFFF, key, 16, 0);
+            
+            
         }
         //Save to buffer
         else if(key == '9')
