@@ -7,6 +7,7 @@
 #include "diskio.h" // SD card driver
 #include <string.h>
 #include "commands.h"
+//#include "commands.c"
 #include "tty.h"
 #include <stdio.h>
 #include "fifo.h"
@@ -46,7 +47,8 @@ float noteMatrix[7][9] = {
 
 typedef struct noteDuration {
     char note;
-    float duration;
+    int duration;
+    int octave;
     struct noteDuration* next; 
 } noteDuration;
 
@@ -55,6 +57,7 @@ int OCTAVE = 4;
 
 noteDuration* headOfNotes = NULL;
 uint8_t buffer[600] = {0};  // Buffer to store the MIDI data
+int sizeOfBuffer = 0;
 
 
 
@@ -70,18 +73,66 @@ void freeList(noteDuration* head) {
     }
 }
 
-noteDuration* createNode(char note, float duration) {
+char char2Note(char input)
+{
+    //key == '*' || key == '0' || key == '#'
+    // case '*': //E note
+    //         return 4;
+    //     case '0': //F note
+    //         return 5;
+    //     case '#': //G note
+    //         return 6;
+    if(input == '*')
+    {
+        return 'E';
+    }
+    else if(input == '0')
+    {
+        return 'F';
+    }
+    else if(input == '#')
+    {
+        return 'G';
+    }
+    else
+    {
+        return input;
+    }
+}
+
+char note2char(char note)
+{
+    if(note == 'E')
+    {
+        return '*';
+    }
+    else if(note == 'F')
+    {
+        return '0';
+    }
+    else if(note == 'G')
+    {
+        return '#';
+    }
+    else
+    {
+        return note;
+    }
+}
+
+noteDuration* createNode(char note, int duration) {
     noteDuration* newNode = (noteDuration*)malloc(sizeof(noteDuration));
     if (newNode == NULL) {
         return NULL;
     }
-    newNode->note = note;
+    newNode->note = char2Note(note);
     newNode->duration = duration;
+    newNode->octave = OCTAVE;
     newNode->next = NULL;
     return newNode;
 }
 
-void pushBack(noteDuration* head, char note, float duration)
+void pushBack(noteDuration* head, char note, int duration)
 {
     noteDuration* iter = head;
 
@@ -99,17 +150,54 @@ void pushBack(noteDuration* head, char note, float duration)
 
 }
 
+char getLastNote()
+{
+    if(headOfNotes == NULL)
+    {
+        return '\0';
+    }
+
+    noteDuration* iter = headOfNotes;
+
+    while(iter->next != NULL)
+    {
+        iter = iter->next;
+    }
+
+    return note2char(iter->note);
+}
+
 
 
 void write_variable_length(uint8_t *buffer, uint32_t value, int *index) {
+
+    // do {
+    //     buffer[*index] = value & 0x7F;  // Keep the lower 7 bits
+    //     if (*index > 0) {
+    //         buffer[*index] |= 0x80;  // Set the MSB for continuation
+    //     }
+    //     value >>= 7;  // Shift right by 7 bits
+    //     (*index)++;
+    // } while (value > 0);
+
+    uint8_t temp[4];
+    int i = 0;
+
     do {
-        buffer[*index] = value & 0x7F;  // Keep the lower 7 bits
-        if (*index > 0) {
-            buffer[*index] |= 0x80;  // Set the MSB for continuation
+        temp[i] = value & 0x7F; // Keep the lower 7 bits
+        if (i > 0) {
+            temp[i] |= 0x80; // Set the MSB for continuation
         }
-        value >>= 7;  // Shift right by 7 bits
-        (*index)++;
+        value >>= 7; // Shift right by 7 bits
+        i++;
     } while (value > 0);
+
+    // Write the bytes in reverse order (most significant byte first)
+    for (int j = i - 1; j >= 0; j--) {
+        //fputc(temp[j], file);
+        buffer[*index] = temp[j];
+        (*index)++;
+    }
 }
 
 void write_tempo_meta_event(uint8_t *buffer, uint32_t tempo, int *index) {
@@ -185,7 +273,7 @@ void write_note_off(uint8_t *buffer, uint32_t delta_time, uint8_t channel, uint8
 //     fputc(velocity, file);                   // Velocity (usually 0)
 // }
 
-long calcTime(float sec)
+long calcTime(int sec)
 {
     float microsec = sec * 1000000;
     float microSecPerTick = 500000 / 480 ; //micro-s per tick
@@ -226,16 +314,15 @@ int note2Offset(char note)
     }
 }
 
-int getNoteNum(char note)
+int getNoteNum(char note, int octave)
 {
-    int number = (12 * OCTAVE) + note2Offset(note);
+    int number = (12 * octave) + note2Offset(note);
     return number;
 }
 
 
-void writeNotes(noteDuration* head, uint8_t *buffer) {
+void writeNotes(noteDuration* head, uint8_t *buffer, int* index) {
     noteDuration* iter = head;
-    int index = 0;
 
     if (head == NULL) {
         return;
@@ -244,13 +331,13 @@ void writeNotes(noteDuration* head, uint8_t *buffer) {
     while (iter != NULL) {
         // Duration
         long duration = calcTime(iter->duration);
-        int noteNum = getNoteNum(iter->note);
+        int noteNum = getNoteNum(iter->note, iter->octave);
 
         // Write note-on event
-        write_note_on(buffer, 0, noteNum, VOLUME, &index);
+        write_note_on(buffer, 0, noteNum, VOLUME, index);
 
         // Write note-off event
-        write_note_off(buffer, duration, 0, noteNum, 0, &index);
+        write_note_off(buffer, duration, 0, noteNum, 0, index);
 
         iter = iter->next;
     }
@@ -261,7 +348,11 @@ void write2Array(noteDuration* notes) {
     int index = 0;
 
     // Write MIDI header chunk
-    memcpy(&buffer[index], "MThd", 4); index += 4;
+    //memcpy(&buffer[index], "MThd", 4); index += 4;
+    buffer[index++] = 'M';
+    buffer[index++] = 'T';
+    buffer[index++] = 'h';
+    buffer[index++] = 'd';
     buffer[index++] = 0x00;
     buffer[index++] = 0x00;
     buffer[index++] = 0x00;
@@ -274,7 +365,11 @@ void write2Array(noteDuration* notes) {
     buffer[index++] = 0xE0;  // Division (480 ticks per quarter note)
 
     // Write track chunk header
-    memcpy(&buffer[index], "MTrk", 4); index += 4;
+    //memcpy(&buffer[index], "MTrk", 4); index += 4;
+    buffer[index++] = 'M';
+    buffer[index++] = 'T';
+    buffer[index++] = 'r';
+    buffer[index++] = 'k';
     buffer[index++] = 0x00;
     buffer[index++] = 0x00;
     buffer[index++] = 0x00;
@@ -284,7 +379,7 @@ void write2Array(noteDuration* notes) {
     write_tempo_meta_event(buffer, 500000, &index);
 
     // Write all notes to array
-    writeNotes(notes, buffer);
+    writeNotes(notes, buffer, &index);
 
     // Write end-of-track meta-event
     buffer[index++] = 0x00;  // Delta time (immediately after last event)
@@ -293,7 +388,7 @@ void write2Array(noteDuration* notes) {
     buffer[index++] = 0x00;  // Length (0 bytes)
 
     // Go back and write the actual track length (subtract 8 bytes for "MTrk" and length placeholder)
-    long track_length = index - 22;  // Header (14 bytes) + "MTrk" (4 bytes) + length field (4 bytes)
+    int track_length = index - 22;  // Header (14 bytes) + "MTrk" (4 bytes) + length field (4 bytes)
 
     // Update the track length in the array
     buffer[18] = (track_length >> 24) & 0xFF;
@@ -301,6 +396,7 @@ void write2Array(noteDuration* notes) {
     buffer[20] = (track_length >> 8) & 0xFF;
     buffer[21] = track_length & 0xFF;
 
+    sizeOfBuffer = index;
     // Now the buffer contains the MIDI data
 
     // You can now do something with the buffer, such as sending it over UART, or saving it to a different storage
@@ -426,31 +522,57 @@ void update_history(int c, int rows)
     
 }
 
-char getKey()
+void clearHist()
 {
-    for(;;)
+    for(int i = 0; i < 4; i++)
     {
-        for(int column = 0; column < 4; column++)
-        { 
-            if(hist[column][0] == hist[column][1] && hist[column][1] == hist[column][2] && hist[column][2] == hist[column][3] 
-            && hist[column][3] == hist[column][4] && hist[column][4] == hist[column][5] && hist[column][5] == hist[column][6]
-            && hist[column][6] == hist[column][7]) //History is all same to remove debouncing
-            {
-                if(hist[col][0] != '\0')
-                {    if(headOfNotes == NULL)
-                    {
-                        headOfNotes = createNode(hist[col][0], 1.5f);
-                    }
-                    else
-                    {
-                        pushBack(headOfNotes, hist[col][0], 1.5f);
-                    }
-                }
-               
-                return hist[col][0];
-            }
+        for(int j = 0; j < 8; j++)
+        {
+            hist[i][j] = '\0';
         }
     }
+
+    return;
+}
+
+
+char getKey()
+{
+    // for(;;)
+    // {
+    for(int column = 0; column < 4; column++)
+    { 
+        if(hist[column][0] == hist[column][1] && hist[column][1] == hist[column][2] && hist[column][2] == hist[column][3] 
+        && hist[column][3] == hist[column][4] && hist[column][4] == hist[column][5] && hist[column][5] == hist[column][6]
+        && hist[column][6] == hist[column][7]) //History is all same to remove debouncing
+        {
+            // char key = hist[col][0];
+            // if(key != '\0' && (key == 'A' || key == 'B' || key == 'C' || key == 'D' || key == '*' || key == '0' || key == '#'))
+            // {   if(headOfNotes == NULL)
+            //     {
+            //         headOfNotes = createNode(hist[col][0], 1.5f);
+            //     }
+            //     else
+            //     {
+            //         pushBack(headOfNotes, hist[col][0], 1.5f);
+            //     }
+
+            //     //char answer = hist[col][0];
+            //     clearHist();
+
+
+            //     return key;
+                
+            // }
+
+            return hist[col][0];
+            
+            
+        }
+    }
+
+    return '\0';
+//}
 }
 
 void drive_column(int c)
@@ -652,7 +774,7 @@ void init_lcd_spi() {
 void lcd_start_setup() {
     LCD_Setup();
     LCD_Clear(0xFFFF);
-    LCD_DrawString(0,96,0x0000,0xFFFF, "The octave is now:", 16, 0);
+    LCD_DrawString(0,96,0x0000,0xFFFF, "The octave is now: 5", 16, 0);
     
 
 }
@@ -702,6 +824,112 @@ void LCD_DrawSpecialChar(u16 x, u16 y, u16 fc, u16 bc, char num, u16 res){
     lcddev.select(0);
 }
 
+
+
+
+
+//========================================================================
+// SD card init setup stuff
+
+void enable_sdcard(void) {
+    GPIOC->ODR &= ~(1 << 11);  // Set PC11 low to enable SD card (CS low)
+}
+
+void disable_sdcard(void) {
+    GPIOC->ODR |= (1 << 11);   // Set PC11 high to disable SD card (CS high)
+}
+
+
+void init_sdcard_spi() {
+
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
+
+    GPIOB->MODER &= ~(0x00300000); // clear pb10
+    GPIOB->MODER |= 0x00200000; // set pb10 to alternate function
+
+    GPIOC->MODER &= ~(0x000000F0);
+    GPIOC->MODER |= 0x000000A0;
+
+    GPIOB->AFR[1] |= (5 << GPIO_AFRH_AFRH2_Pos); // set af5 pb10
+    GPIOC->AFR[0] |= (5 << GPIO_AFRL_AFRL2_Pos) | (5 << GPIO_AFRL_AFRL3_Pos); // af5 for pc2, 3
+
+    disable_sdcard();
+
+    RCC->APB1ENR |= RCC_APB1ENR_SPI2EN; // set up spi2
+    SPI2->CR1 &= ~SPI_CR1_SPE;
+
+    SPI2->CR1 |= SPI_CR1_BR; //lowest baud rate (highest divisor)
+    SPI2->CR1 |= SPI_CR1_MSTR;
+
+    SPI2->CR2 &= ~(SPI_CR2_DS_0);
+    SPI2->CR2 |= SPI_CR2_DS_1 | SPI_CR2_DS_2 | SPI_CR2_DS_3; // word size 8
+
+    SPI2->CR1 |= SPI_CR1_SSM; // software slave mgmt
+    SPI2->CR1 |= SPI_CR1_SSI; // internal slave select
+
+    SPI2->CR2 |= SPI_CR2_FRXTH; // fifo reception release
+
+    SPI2->CR1 |= SPI_CR1_SPE; // enable
+
+
+
+}
+
+void sdcard_high_speed () {
+
+    SPI2->CR1 &= ~(SPI_CR1_SPE); // disable
+
+    SPI2->CR2 &= ~(SPI_CR1_BR);
+    //SPI2->CR2 &= ~(SPI_CR1_BR_1);
+    //SPI2->CR2 |= SPI_CR1_BR_2; // 001 for /4. 48/4 = 12 MHz
+
+    SPI2->CR1 |= SPI_CR1_SPE; // reenable
+
+}
+
+
+
+// writing to SD card
+
+void save_midi_to_sd(uint8_t *midi_data, uint32_t midi_data_size) {
+    // mount the SD card
+    //   // file system object
+    FRESULT res;
+    mount(1, NULL);
+    // FRESULT res = f_mount(&fs, "", 1);  // mount
+    // if (res != FR_OK) {
+    //     // if mounting fails
+    //     printf("Failed to mount SD card: %d\n", res);
+    //     return;
+    // }
+
+    // create or open the MIDI file
+    FIL midi_file;  // file object
+    res = f_open(&midi_file, "wee.mid", FA_WRITE | FA_CREATE_ALWAYS);
+    if (res != FR_OK) {
+        // error handling
+        //printf("Failed to open file: %d\n", res);
+        //f_mount(NULL, "", 1);  // unmount
+        return;
+    }
+
+    // write the MIDI data to the file
+    UINT bytes_written;
+    res = f_write(&midi_file, midi_data, midi_data_size, &bytes_written);
+    if (res != FR_OK || bytes_written != midi_data_size) {
+        // error handling if writing fails
+        //printf("Failed to write data to file: %d\n", res);
+    } else {
+        //printf("MIDI file written successfully, bytes: %d\n", bytes_written);
+    }
+
+    // close the file and unmount the SD card
+    f_close(&midi_file);
+    //f_mount(NULL, "", 1);  // Unmount SD card
+}
+
+//=======================================================================
 
 
 //============================================================================
@@ -972,6 +1200,8 @@ int main() {
     init_wavetable();
     setup_dac();
     init_tim6();
+    init_sdcard_spi();
+    sdcard_high_speed();
 
 
     //init_usart5();
@@ -991,15 +1221,35 @@ int main() {
         //Change note
         if(key == 'A' || key == 'B' || key == 'C' || key == 'D' || key == '*' || key == '0' || key == '#')
         {
+            //Only add if new key
+            char lastNote = getLastNote();
+            if((getLastNote() != key)) //|| (getLastNote() == 'E' && key == '*') || (getLastNote() == 'F' && key == '0') || (getLastNote() == 'G' && key == '#')))
+            {
+                set_freq(0,getNote(key));
+                LCD_DrawSpecialChar(0,0, 0x0000, 0xffff, key, 3);
+                LCD_DrawFillRectangle(0, 112, 56, 128, 0xFFFF);
+
+                if(headOfNotes == NULL)
+                {
+                    headOfNotes = createNode(key, 1);
+                }
+                else
+                {
+                    pushBack(headOfNotes, key, 1);
+                }
+
+                
+            }
+            //nano_wait(50000000);
             
-            set_freq(0,getNote(key));
-            LCD_DrawSpecialChar(0,0, 0x0000, 0xffff, key, 3);
+            
         }
         //Change octave
         else if((key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8'))
         {
             OCTAVE = setOctave(key);
             LCD_DrawChar(152, 96, 0x0000, 0xFFFF, key, 16, 0);
+            LCD_DrawFillRectangle(0, 112, 56, 128, 0xFFFF);
             
             
         }
@@ -1007,10 +1257,14 @@ int main() {
         else if(key == '9')
         {
             write2Array(headOfNotes);
+            save_midi_to_sd(buffer, sizeOfBuffer);
             set_freq(0,0);
             //headOfNotes = NULL;
-            return 0;
+            LCD_DrawString(0, 112, 0x0000, 0xFFFF, "Saved!", 16, 0);
+            //return 0;
         }
+
+    
     }
 
     freeList(headOfNotes);

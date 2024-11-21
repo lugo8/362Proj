@@ -7,5 +7,6 @@ struct commands_t {
 };
 
 void command_shell(void);
+void mount(int argc, char * argv[]);
 
 #endif /* __COMMANDS_H_ */
